@@ -16,4 +16,6 @@ import sgtk
 
 
 class AlembicOutputNode(sgtk.platform.Application):
-    pass
+    def init_app(self):
+        module = self.import_module("tk_houdini_alembicnode")
+        self.handler = module.ToolkitAlembicNodeHandler(self)
