@@ -1,304 +1,293 @@
 # Copyright (c) 2013 Shotgun Software Inc.
-# 
+#
 # CONFIDENTIAL AND PROPRIETARY
-# 
-# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit 
+#
+# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit
 # Source Code License included in this distribution package. See LICENSE.
-# By accessing, using, copying or modifying this work you indicate your 
-# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights 
+# By accessing, using, copying or modifying this work you indicate your
+# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
 
 import os
 import sys
 
 import hou
+
 import sgtk
 
-
-class ToolkitAlembicNodeHandler(object):
-
-    SG_NODE_CLASS = 'sgtk_alembic'
-    PARM_OUTPUT_PATH = 'filename'
-    PARM_CONFIG = 'alembic_config'
-
-    def __init__(self, app):
-        self._app = app
-        self._work_file_template = self._app.get_template("work_file_template")
+class TkAlembicNodeHandler(object):
+    """Handle Tk Alembic node operations and callbacks."""
 
     ############################################################################
-    # Public methods
+    # Class data
 
-    def compute_path(self, node):
-        # Get relevant fields from the scene filename and contents
-        work_file_fields = self.__get_hipfile_fields()
-        if not work_file_fields:
-            msg = "This Houdini file is not a Shotgun Toolkit work file!"
-            raise sgtk.TankError(msg)
+    HOU_ROP_ALEMBIC_TYPE = "rop_alembic"
+    """Houdini type for regular alembic rops."""
 
-        # Get the templates from the app
-        template = self._app.get_template("work_cache_template")
+    HOU_SOP_ALEMBIC_TYPE = "alembic"
+    """Houdini type for regular alembic sops."""
 
-        # create fields dict with all the metadata
-        fields = {}
-        fields["name"] = work_file_fields.get("name")
-        fields["version"] = work_file_fields["version"]
-        fields["renderpass"] = node.name()
-        fields["SEQ"] = "FORMAT: $F"
+    NODE_OUTPUT_PATH_PARM = "filename"
+    """The name of the output path parameter on the node."""
 
-        # Get the camera width and height if necessary
-        if "width" in template.keys or "height" in template.keys:
-            # Get the camera
-            cam_path = node.parm("geometry1_camera").eval()
-            cam_node = hou.node(cam_path)
-            if not cam_node:
-                raise sgtk.TankError("Camera %s not found." % cam_path)
+    TK_ALEMBIC_NODE_TYPE = "sgtk_alembic"
+    """The class of node as defined in Houdini for the Alembic nodes."""
 
-            fields["width"] = cam_node.parm("resx").eval()
-            fields["height"] = cam_node.parm("resy").eval()
+    TK_CONFIG_PARM = "alembic_config"
+    """The name of the parameter that stores the toolkit node configuration."""
 
-        fields.update(self._app.context.as_template_fields(template))
+    TK_CONFIG_NAME_KEY = "tk_config_name"
+    """The name of the key in the user data that stores the config name."""
 
-        path = template.apply_fields(fields)
-        path = path.replace(os.path.sep, "/")
+    ############################################################################
+    # Class methods
 
-        return path
+    @classmethod
+    def convert_back_to_toolkit_alembic_nodes(cls, app):
+        """Convert Alembic nodes back to Toolkit Alembic nodes.
 
-    def get_nodes(self, class_=None):
-        """
-        Returns a list of sgtk nodes
-        """
-        node_class = ToolkitAlembicNodeHandler.SG_NODE_CLASS
-        sop = True if not class_ or class_ == 'sop' else False
-        rop = True if not class_ or class_ == 'rop' else False
-        nodes = []
-        if sop:
-            nodes += hou.nodeType(hou.sopNodeTypeCategory(),
-                                  node_class).instances()
-        if rop:
-            nodes += hou.nodeType(hou.ropNodeTypeCategory(),
-                                  node_class).instances()
-        return nodes
+        :param app: The calling Toolkit Application
 
-    def get_node_profile_name(self, node):
-        """
-        Return the name of the profile the specified node is using
-        """
-        config_parm = node.parm(self.PARM_CONFIG)
-        return config_parm.menuLabels()[config_parm.eval()]
+        Note: only converts nodes that had previously been Toolkit Alembic
+        nodes.
 
-    def get_files_on_disk(self, node):
-        """
-        Called from render publisher & UI (via exists_on_disk)
-        Returns the files on disk associated with this node
-        """
-        return self.__get_files_on_disk(node)
-
-    def create_file_node(self):
-        """
-        Used by alembic_filein_button callback.
-        Creates an alembic node.
-        Sets the path to the current output path of this node.
-        Sets the node name to the current nodes names.
-        """
-        node = hou.pwd()
-
-        parm = node.parm(self.PARM_OUTPUT_PATH)
-        name = 'file_' + node.name()
-
-        abc_sop = node.parent().createNode("alembic")
-        abc_sop.parm("fileName").set(parm.menuLabels()[parm.eval()])
-        abc_sop.setName(name, unique_name=True)
-
-        # Move it away from the origin
-        abc_sop.moveToGoodPosition()
-
-    def set_default_node_name(self, node):
-        name = self._app.get_setting('default_node_name')
-        return node.setName(name, unique_name=True)
-
-    def create_output_path_menu(self):
-        """
-        Creates the output path menu.
-        """
-        node = hou.pwd()
-
-        # Build the menu
-        menu = []
-        menu.append("sgtk")
-
-        try:
-            menu.append(self.compute_path(node))
-        except sgtk.TankError, err:
-            warn_err = '{0}: {1}'.format(node.name(), err)
-            self._app.log_warning(warn_err)
-            menu.append("ERROR: %s" % err)
-
-        return menu
-
-    def convert_sg_to_alembic_nodes(self):
-        """
-        Utility function to convert all Shotgun Alembic nodes to regular
-        Alembic nodes.
-
-        # Example use:
-        import sgtk
-        eng = sgtk.platform.current_engine()
-        app = eng.apps["tk-houdini-alembicnode"]
-        # Convert Shotgun Alembic nodes to Alembic nodes:
-        app.convert_to_alembic_nodes()
         """
 
-        # get sgtk alembic nodes:
-        sg_nodes = self.get_nodes()
-        for sg_n in sg_nodes:
-            sop_types = hou.sopNodeTypeCategory().nodeTypes()
-            sop_type = sop_types[ToolkitAlembicNodeHandler.SG_NODE_CLASS]
-            rop_types = hou.ropNodeTypeCategory().nodeTypes()
-            rop_type = rop_types[ToolkitAlembicNodeHandler.SG_NODE_CLASS]
-            is_sop = sg_n.type() == sop_type
-            is_rop = sg_n.type() == rop_type
+        # get all rop/sop alembic nodes in the session
+        alembic_nodes = []
+        alembic_nodes.extend(hou.nodeType(hou.sopNodeTypeCategory(),
+            cls.HOU_SOP_ALEMBIC_TYPE).instances())
+        alembic_nodes.extend(hou.nodeType(hou.ropNodeTypeCategory(),
+            cls.HOU_ROP_ALEMBIC_TYPE).instances())
 
-            # set as selected:
-            node_name = sg_n.name()
-            node_pos = sg_n.position()
+        # the tk node type we'll be converting to
+        node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
 
-            # create new regular Alembic node:
+        # iterate over all the alembic nodes and attempt to convert them
+        for alembic_node in alembic_nodes:
 
-            if is_sop:
-                alembic_operator = 'rop_alembic'
-            elif is_rop:
-                alembic_operator = 'alembic'
-            else:
+            # get the user data dictionary stored on the node
+            user_dict = alembic_node.userDataDict()
+
+            # get the config data from the dictionary
+            tk_config_name = user_dict.get(cls.TK_CONFIG_NAME_KEY)
+
+            if not tk_config_name:
+                app.log_warning(
+                    "Almbic node '%s' does not have tk config name. "
+                    "Can't convert to Tk Alembic node. Continuing." %
+                    (alembic_node.name(),)
+                )
                 continue
 
-            new_n = sg_n.parent().createNode(alembic_operator)
+            # create a new, Toolkit Alembic node:
+            tk_alembic_node = alembic_node.parent().createNode(node_type)
 
-            # copy across file parms:
-            filename = self.__get_menu_label(sg_n.parm('filename'))
-            new_n.parm('filename').set(filename)
-
-            # copy across any knob values from the internal alembic node.
-            # parmTuples
-            exclude = ['filename']
-            self.__copy_parm_values(sg_n, new_n, exclude)
-
-            # Store Toolkit specific information on write node
-            # so that we can reverse this process later
-
-            # Profile Name
-            new_n.setUserData('tk_profile_name',
-                              self.get_node_profile_name(sg_n))
-
-            # Copy inputs and move outputs
-            self.__copy_color(sg_n, new_n)
-            self.__copy_inputs_to_node(sg_n, new_n)
-            if is_sop:
-                self.__move_outputs_to_node(sg_n, new_n)
-
-            # delete original node:
-            sg_n.destroy()
-
-            # rename new node:
-            new_n.setName(node_name)
-            new_n.setPosition(node_pos)
-
-    def convert_alembic_to_sg_nodes(self):
-        """
-        Utility function to convert all Alembic nodes to Shotgun
-        Alembic nodes (only converts Alembic nodes that were previously
-        Shotgun Alembic nodes)
-
-        # Example use:
-        import sgtk
-        eng = sgtk.platform.current_engine()
-        app = eng.apps["tk-houdini-alembicnode"]
-        # Convert previously converted Alembic nodes back to
-        # Shotgun Alembic nodes:
-        app.convert_from_alembic_nodes()
-        """
-
-        # get alembic nodes:
-        sop_nodes = hou.nodeType(hou.sopNodeTypeCategory(),
-                                 'rop_alembic').instances()
-        rop_nodes = hou.nodeType(hou.ropNodeTypeCategory(),
-                                 'alembic').instances()
-        nodes = sop_nodes + rop_nodes
-        for n in nodes:
-
-            user_dict = n.userDataDict()
-
-            profile = user_dict.get('tk_profile_name')
-
-            if not profile:
-                # can't convert to a Shotgun Alembic Node
-                # as we have missing parameters!
-                continue
-
-            # set as selected:
-            # wn.setSelected(True)
-            node_name = n.name()
-            node_pos = n.position()
-
-            # create new Shotgun Alembic node:
-            node_class = ToolkitAlembicNodeHandler.SG_NODE_CLASS
-            new_sg_n = n.parent().createNode(node_class)
-
-            # set the profile
+            # find the index of the stored name on the new tk alembic node
+            # and set that item in the menu.
             try:
-                parm = new_sg_n.parm(ToolkitAlembicNodeHandler.PARM_CONFIG)
-                index = parm.menuLabels().index(profile)
+                config_parm = tk_alembic_node.parm(
+                    TkAlembicNodeHandler.TK_CONFIG_PARM)
+                index = config_parm.menuLabels().index(tk_config_name)
                 parm.set(index)
             except ValueError:
                 pass
 
-            # copy across and knob values from the internal write node.
-            exclude = ['filename']
-            self.__copy_parm_values(n, new_sg_n, exclude)
+            # copy over all parameter values except the output path 
+            _copy_parm_values(alembic_node, tk_alembic_node,
+                excludes=[cls.NODE_OUTPUT_PATH_PARM])
 
-            # Copy inputs and move outputs
-            self.__copy_inputs_to_node(n, new_sg_n)
-            self.__move_outputs_to_node(n, new_sg_n)
-            self.__copy_color(n, new_sg_n)
+            # copy the inputs and move the outputs
+            _copy_inputs(alembic_node, tk_alembic_node)
+            _move_outputs(alembic_node, tk_alembic_node)
 
-            # delete original node:
-            n.destroy()
+            # make the new node the same color
+            tk_alembic_node.setColor(alembic_node.color())
 
-            # rename new node:
-            new_sg_n.setName(node_name)
-            new_sg_n.setPosition(node_pos)
+            # remember the name and position of the original alembic node
+            alembic_node_name = n.name()
+            alembic_node_pos = n.position()
+
+            # destroy the original alembic node
+            alembic_node.destroy()
+
+            # name and reposition the new, regular alembic node to match the
+            # original
+            tk_alembic_node.setName(alembic_node_name)
+            tk_alembic_node.setPosition(alembic_node_pos)
+
+            app.log_debug("Converted: Alembic node '%s' to TK Alembic node."
+                % (alembic_node_name,))
+
+    @classmethod
+    def convert_to_regular_alembic_nodes(cls, app):
+        """Convert Toolkit Alembic nodes to regular Alembic nodes.
+
+        :param app: The calling Toolkit Application
+
+        """
+
+        # retrieve all of the tk alembic nodes in the session
+        tk_alembic_nodes = cls.get_tk_alembic_nodes()
+
+        if not tk_alembic_nodes:
+            app.log_debug("No Toolkit Alembic Nodes found for conversion.")
+            return
+
+        node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
+
+        # determine the surface operator type for this class of node
+        sop_types = hou.sopNodeTypeCategory().nodeTypes()
+        sop_type = sop_types[node_type]
+
+        # determine the render operator type for this class of node
+        rop_types = hou.ropNodeTypeCategory().nodeTypes()
+        rop_type = rop_types[node_type]
+
+        # get all instances of tk alembic rop/sop nodes
+        tk_alembic_nodes = []
+        tk_alembic_nodes.extend(
+            hou.nodeType(hou.sopNodeTypeCategory(), node_type).instances())
+        tk_alembic_nodes.extend(
+            hou.nodeType(hou.ropNodeTypeCategory(), node_type).instances())
+
+        # iterate over all the tk alembic nodes and attempt to convert them
+        for tk_alembic_node in tk_alembic_nodes:
+
+            # determine the corresponding, built-in operator type
+            if tk_alembic_node.type() == sop_type:
+                alembic_operator = cls.HOU_SOP_ALEMBIC_TYPE
+            elif tk_alembic_node.type() == rop_type:
+                alembic_operator = cls.HOU_ROP_ALEMBIC_TYPE
+            else:
+                app.log_warning("Unknown type for node '%s': %s'" %
+                    (tk_alembic_node.name(), tk_alembic_node.type()))
+                continue
+
+            # create a new, regular Alembic node
+            alembic_node = tk_alembic_node.parent().createNode(alembic_operator)
+
+            # copy the file parms value to the new node
+            filename = _get_output_menu_label(
+                tk_alembic_node.parm(cls.NODE_OUTPUT_PATH_PARM))
+            alembic_node.parm(cls.NODE_OUTPUT_PATH_PARM).set(filename)
+
+            # copy across knob values
+            _copy_parm_values(tk_alembic_node, alembic_node,
+                excludes=[cls.NODE_OUTPUT_PATH_PARM])
+
+            # store the alembic config name in the user data so that we can
+            # retrieve it later.
+            config_parm = tk_alembic_node.parm(cls.TK_CONFIG_PARM)
+            tk_config_name = config_parm.menuLabels()[config_parm.eval()]
+            alembic_node.setUserData(cls.TK_CONFIG_NAME_KEY, tk_config_name)
+
+            # copy the inputs and move the outputs
+            _copy_inputs(tk_alembic_node, alembic_node)
+            if alembic_operator == cls.HOU_SOP_ALEMBIC_TYPE:
+                _move_outputs(tk_alembic_node, alembic_node)
+
+            # make the new node the same color
+            alembic_node.setColor(tk_alembic_node.color())
+
+            # remember the name and position of the original tk alembic node
+            tk_alembic_node_name = tk_alembic_node.name()
+            tk_alembic_node_pos = tk_alembic_node.position()
+
+            # destroy the original tk alembic node
+            tk_alembic_node.destroy()
+
+            # name and reposition the new, regular alembic node to match the
+            # original
+            alembic_node.setName(tk_alembic_node_name)
+            alembic_node.setPosition(tk_alembic_node_pos)
+
+            app.log_debug("Converted: Tk Alembic node '%s' to Alembic node."
+                % (tk_alembic_node_name,))
+
 
     ############################################################################
-    # Public methods called from OTL - although these are public, they should
-    # be considered as private and not used directly!
+    # Instance methods
 
-    def on_copy_path_to_clipboard_button_callback(self):
-        """
-        Callback from the gizmo whenever the 'Copy path to clipboard' button
-        is pressed.
-        """
-        node = hou.pwd()
 
-        # get the path depending if in full or proxy mode:
-        render_path = self.__get_render_path(node)
+    def __init__(self, app):
+        """Initialize the handler.
+        
+        :params app: The application instance. 
+        
+        """
+
+        # keep a reference to the app for easy access to templates, settings,
+        # logging methods, tank, context, etc.
+        self._app = app
+    
+
+    ############################################################################
+    # methods and callbacks executed via the OTLs
+
+
+    # create an Alembic node,  set the path to the output path of current node
+    def _create_alembic_node(self):
+        current_node = hou.pwd()
+
+        cls = self.__class__
+
+        output_path_parm = current_node.parm(cls.NODE_OUTPUT_PATH_PARM)
+        alembic_node_name = 'alembic_' + current_node.name()
+
+        # create the alembic node and set the filename parm
+        alembic_node = node.parent().createNode(cls.HOU_SOP_ALEMBIC_TYPE)
+        alembic_node.parm(cls.NODE_OUTPUT_PATH_PARM).set(
+            output_path_parm.menuLabels()[output_path_parm.eval()])
+        alembic_node.setName(alembic_node_name, unique_name=True)
+
+        # move it away from the origin
+        alembic_node.moveToGoodPosition()
+
+
+    # returns a list of menu items for the current node
+    def _get_output_path_menu_items(self):
+        menu = ["sgtk"]
+        current_node = hou.pwd()
+
+        # attempt to compute the output path and add it as an item in the menu
+        try:
+            menu.append(self._compute_output_path(current_node))
+        except sgtk.TankError as e:
+            error_msg = ("Unable to construct the output path menu items: " 
+                         "%s - %s" % (current_node.name(), e))
+            self._app.log_error(error_msg)
+            menu.append("ERROR: %s" % (error_msg,))
+
+        return menu
+
+
+    # copy the render path for the current node to the clipboard
+    def _copy_path_to_clipboard(self):
+
+        render_path = self._get_render_path(hou.pwd())
 
         # use Qt to copy the path to the clipboard:
         from sgtk.platform.qt import QtGui
         QtGui.QApplication.clipboard().setText(render_path)
 
-    def on_show_in_fs_button_callback(self):
-        """
-        Shows the location of the node in the file system.
-        This is a callback which is executed when the show in fs
-        button is pressed on the houdini output node.
-        """
-        node = hou.pwd()
-        if not node:
+        self._app.log_debug(
+            "Copied render path to clipboard: %s" % (render_path,))
+
+
+    # open a file browser showing the render path of the current node
+    def _show_in_fs(self):
+
+        # retrieve the calling node
+        current_node = hou.pwd()
+        if not current_node:
             return
 
         render_dir = None
 
         # first, try to just use the current cached path:
-        render_path = self.__get_render_path(node)
+        render_path = self._get_render_path(current_node)
+
         if render_path:
             # the above method returns houdini style slashes, so ensure these
             # are pointing correctly
@@ -311,21 +300,20 @@ class ToolkitAlembicNodeHandler(object):
         if not render_dir:
             # render directory doesn't exist so try using location
             # of rendered frames instead:
-            try:
-                files = self.get_files_on_disk(node)
-                if len(files) == 0:
-                    msg = ("There are no renders for this node yet!\n"
-                           "When you render, the files will be written to "
-                           "the following location:\n\n%s" % render_path)
-                    hou.ui.displayMessage(msg)
-                else:
-                    render_dir = os.path.dirname(files[0])
-            except Exception, e:
-                msg = ("Unable to jump to file system:\n\n%s" % e)
+            rendered_files = self._get_rendered_files(current_node)
+
+            if not rendered_files:
+                msg = ("Unable to find rendered files for node '%s'." 
+                       % (current_node,))
+                self.log_error(msg)
                 hou.ui.displayMessage(msg)
+                return
+            else:
+                render_dir = os.path.dirname(rendered_files[0])
 
         # if we have a valid render path then show it:
         if render_dir:
+            # XXX call utility method on core
             system = sys.platform
 
             # run the app
@@ -336,142 +324,181 @@ class ToolkitAlembicNodeHandler(object):
             elif system == "win32":
                 cmd = "cmd.exe /C start \"Folder\" \"%s\"" % render_dir
             else:
-                raise Exception("Platform '%s' is not supported." % system)
+                msg = "Platform '%s' is not supported." % (system,)
+                self.log_error(msg)
+                hou.ui.displayMessage(msg)
 
-            self._app.log_debug("Executing command '%s'" % cmd)
+            self._app.log_debug("Executing command:\n '%s'" % (cmd,))
             exit_code = os.system(cmd)
             if exit_code != 0:
-                msg = ("Failed to launch '%s'!" % cmd)
+                msg = "Failed to launch '%s'!" % (cmd,)
                 hou.ui.displayMessage(msg)
+
+    # lookup the default node name from the settings and apply it to the
+    # supplied node
+    def _set_default_node_name(self, node):
+        default_name = self._app.get_setting('default_node_name')
+        return node.setName(name, unique_name=True)
+
 
     ############################################################################
     # Private methods
 
-    def __copy_color(self, node_a, node_b):
-        color_a = node_a.color()
-        node_b.setColor(color_a)
 
-    def __get_menu_label(self, parm, check_for_sgtk=True):
-        if not check_for_sgtk:
-            return parm.menuLabels()[parm.eval()]
+    # compute the output path based on the current work file and cache template
+    def _compute_output_path(self, node):
 
-        if parm.menuItems()[parm.eval()] == 'sgtk':
-            return parm.menuLabels()[parm.eval()]
-        else:
-            return parm.menuItems()[parm.eval()]
+        # get relevant fields from the current file path
+        work_file_fields = self._get_hipfile_fields()
 
-    def __get_hipfile_fields(self):
-        """
-        Extract fields from the current Houdini file using the template
-        """
-        curr_filename = hou.hipFile.path()
+        if not work_file_fields:
+            msg = "This Houdini file is not a Shotgun Toolkit work file!"
+            raise sgtk.TankError(msg)
+
+        # Get the cache templates from the app
+        work_cache_template = self._app.get_template("work_cache_template")
+
+        # create fields dict with all the metadata
+        fields = {
+            "name": work_file_fields.get("name", None),
+            "version": work_file_fields.get("version", None),
+            "renderpass": node.name(),
+            "SEQ": "FORMAT: $F",
+        }
+
+        # get the camera width and height if necessary
+        if ("width" in work_cache_template.keys or 
+            "height" in work_cache_template.keys):
+            cam_path = node.parm("geometry1_camera").eval()
+            cam_node = hou.node(cam_path)
+            if not cam_node:
+                raise sgtk.TankError("Camera %s not found." % cam_path)
+
+            fields["width"] = cam_node.parm("resx").eval()
+            fields["height"] = cam_node.parm("resy").eval()
+
+        fields.update(self._app.context.as_template_fields(work_cache_template))
+
+        path = template.apply_fields(fields)
+        path = path.replace(os.path.sep, "/")
+
+        return path
+
+
+    # extract fields from current Houdini file using the workfile template
+    def _get_hipfile_fields(self):
+        current_file_path = hou.hipFile.path()
 
         work_fields = {}
-        if self._work_file_template \
-                and self._work_file_template.validate(curr_filename):
-            work_fields = self._work_file_template.get_fields(curr_filename)
+        work_file_template = self._app.get_template("work_file_template")
+        if (work_file_template and 
+            work_file_template.validate(current_file_path):
+            work_fields = work_file_template.get_fields(current_file_path)
 
         return work_fields
 
-    def __get_render_path(self, node):
-        output_parm = node.parm(self.PARM_OUTPUT_PATH)
+
+    # get the render path from current item in the output path parm menu
+    def _get_render_path(self, node):
+        output_parm = node.parm(self.__class__.NODE_OUTPUT_PATH_PARM)
         path = output_parm.menuLabels()[output_parm.eval()]
         return path
 
-    def __get_render_template(self, node):
-        """
-        Get a specific render template for the current profile
-        """
-        return self.__get_template(node, "work_cache_template")
 
-    def __get_template(self, node, name):
-        """
-        Get the named template for the specified node.
-        """
-        return self._app.get_template(name)
+    # returns the files on disk associated with this node
+    def _get_rendered_files(self, node):
 
-    def __get_files_on_disk(self, node):
-        """
-        Called from render publisher & UI (via exists_on_disk)
-        Returns the files on disk associated with this node
-        """
-        file_name = self.__get_render_path(node)
-        template = self.__get_render_template(node)
+        file_name = self._get_render_path(node)
+        template = self._app.get_template("work_cache_template")
 
         if not template.validate(file_name):
-            msg = ("Could not resolve the files on disk for node %s."
-                   "The path '%s' is not recognized by Shotgun!"
+            msg = ("Unable to validate files on disk for node %s."
+                   "The path '%s' is not recognized by Shotgun."
                    % (node.name(), file_name))
-            raise Exception(msg)
-
+            self.log_error(msg)
+            return []
+            
         fields = template.get_fields(file_name)
 
-        # make sure we don't look for any eye - %V or SEQ - %04d stuff
-        frames = self._app.tank.paths_from_template(template, fields,
-                                                    ["SEQ", "eye"])
-        return frames
+        # get the actual file paths based on the template. Ignore any sequence
+        # or eye fields
+        return self._app.tank.paths_from_template(
+            template, fields, ["SEQ", "eye"])
 
-    def __copy_parm_values(self, source_node, target_node, exclude=None):
-        """
-        Copy parameter values of the source node to those of the target node
-        if a parameter with the same name exists.
-        """
-        exclude = exclude if exclude else []
-        parms = [p for p in source_node.parms() if p.name() not in exclude]
-        for parm_to_copy in parms:
 
-            parm_template = parm_to_copy.parmTemplate()
-            # Skip folder parms.
-            if isinstance(parm_template, hou.FolderSetParmTemplate):
-                continue
+################################################################################
+# Utility methods
 
-            parm_to_copy_to = target_node.parm(parm_to_copy.name())
-            # If the parm on the target node does not exist, skip this parm.
-            if parm_to_copy_to is None:
-                continue
 
-            # If we have keys/expressions we need to copy them all.
-            if parm_to_copy.keyframes():
-                # Copy all hou.Keyframe objects.
-                for key in parm_to_copy.keyframes():
-                    parm_to_copy_to.setKeyframe(key)
+# Copy all the input connections from this node to the target node.
+def _copy_inputs(source_node, target_node):
+
+    input_connections = source_node.inputConnections()
+    num_target_inputs = len(target_node.inputConnectors())
+
+    if len(input_connections) != num_target_inputs:
+        raise hou.InvalidInput(
+            "Node input count does not match. Cannot copy inputs from "
+            "'%s' to '%s'" % (source_node, target_node)
+        )
+        
+    for connection in input_connections:
+        target.setInput(connection.inputIndex(), connection.inputNode())
+
+
+# Copy parameter values of the source node to those of the target node if a
+# parameter with the same name exists.
+def _copy_parm_values(source_node, target_node, excludes=None):
+
+    if not excludes:
+        excludes = []
+
+    # build a parameter list from the source node, ignoring the excludes
+    source_parms = [
+        parm for parm in source_node.parms() if parm.name() not in excludes]
+
+    for source_parm in source_parms:
+
+        source_parm_template = source_parm.parmTemplate()
+
+        # skip folder parms
+        if isinstance(source_parm_template, hou.FolderSetParmTemplate):
+            continue
+
+        target_parm = target_node.parm(source_parm.name())
+
+        # if the parm on the target node doesn't exist, skip it
+        if target_parm is None:
+            continue
+
+        # if we have keys/expressions we need to copy them all.
+        if source_parm.keyframes():
+            for key in source_parm.keyframes():
+                target_parm.setKeyframe(key)
+        else:
+            # if the parameter is a string, copy the raw string.
+            if isinstance(source_parm_template, hou.StringParmTemplate):
+                target_parm.set(source_parm.unexpandedString())
+            # copy the evaluated value
             else:
-                # If the parameter is a string copy the raw string.
-                if isinstance(parm_template, hou.StringParmTemplate):
-                    parm_to_copy_to.set(parm_to_copy.unexpandedString())
-                # Copy the raw value.
-                else:
-                    parm_to_copy_to.set(parm_to_copy.eval())
+                target_parm.set(source_parm.eval())
 
-    def __copy_inputs_to_node(self, node, target, ignore_missing=False):
-        """ Copy all the input connections from this node to the
-            target node.
 
-            ignore_missing: If the target node does not have enough
-                            inputs then skip this connection.
-        """
-        input_connections = node.inputConnections()
+# return the menu label for the supplied parameter
+def _get_output_menu_label(parm):
+    if parm.menuItems()[parm.eval()] == "sgtk":
+        # evaluated sgtk path from item
+        return parm.menuLabels()[parm.eval()] 
+    else:
+        # output path from menu label
+        return parm.menuItems()[parm.eval()] 
 
-        num_target_inputs = len(target.inputConnectors())
-        if num_target_inputs is 0:
-            raise hou.OperationFailed("Target node has no inputs.")
 
-        for connection in input_connections:
-            index = connection.inputIndex()
-            if index > (num_target_inputs - 1):
-                if ignore_missing:
-                    continue
-                else:
-                    raise hou.InvalidInput("Target node has too few inputs.")
+# move all the output connections from the source node to the target node
+def _move_outputs(source_node, target_node):
 
-            target.setInput(index, connection.inputNode())
+    for connection in source_node.outputConnections():
+        output_node = connection.outputNode()
+        output_node.setInput(connection.inputIndex(), target_node)
 
-    def __move_outputs_to_node(self, node, target):
-        """ Move all the output connections from this node to the
-            target node.
-        """
-        output_connections = node.outputConnections()
 
-        for connection in output_connections:
-            node = connection.outputNode()
-            node.setInput(connection.inputIndex(), target)

@@ -22,8 +22,9 @@ configuration:
     default_node_name:
         type: str
         description: >
-            A default name the node will be named after when it is created in Houdini.
-            Allowed characters: letters, numbers, periods, dashes, or underscores.
+            A default name for Alembic output nodes created in houdini.
+            Allowed characters include letters, numbers, periods, dashes, or
+            underscores.
         default_value: sgtk_alembic
 
     work_file_template:
