@@ -392,7 +392,7 @@ class TkAlembicNodeHandler(object):
         work_fields = {}
         work_file_template = self._app.get_template("work_file_template")
         if (work_file_template and 
-            work_file_template.validate(current_file_path):
+            work_file_template.validate(current_file_path)):
             work_fields = work_file_template.get_fields(current_file_path)
 
         return work_fields
