@@ -22,9 +22,6 @@ class TkAlembicNodeApp(sgtk.platform.Application):
         """Initialize the app."""
 
         tk_houdini_alembic = self.import_module("tk_houdini_alembicnode")
-
-        # XXX figure out if this is really necessary. can/should we put the
-        # logic in this file? what makes the most sense?
         self.handler = tk_houdini_alembic.TkAlembicNodeHandler(self)
 
     def convert_to_regular_alembic_nodes(self):
@@ -46,9 +43,10 @@ class TkAlembicNodeApp(sgtk.platform.Application):
         self.log_debug(
             "Converting Toolkit Alembic nodes to built-in Alembic nodes.")
         tk_houdini_alembic = self.import_module("tk_houdini_alembicnode")
-        tk_houdini_alembic.convert_to_regular_alembic_nodes(self)
+        tk_houdini_alembic.TkAlembicNodeHandler.\
+            convert_to_regular_alembic_nodes(self)
 
-    def convert_back_to_toolkit_alembic_nodes(self):
+    def convert_back_to_tk_alembic_nodes(self):
         """Convert regular Alembic nodes back to Tooklit Alembic nodes.
         
         Convert any regular Alembic nodes that were previously been converted
@@ -59,13 +57,14 @@ class TkAlembicNodeApp(sgtk.platform.Application):
         >>> import sgtk
         >>> eng = sgtk.platform.current_engine()
         >>> app = eng.apps["tk-houdini-alembicnode"]
-        >>> app.convert_back_to_toolkit_alembic_nodes()
+        >>> app.convert_back_to_tk_alembic_nodes()
 
         """
 
         self.log_debug(
-            "Converting built-in Alembig nodes back to Toolkit Alembic nodes.")
+            "Converting built-in Alembic nodes back to Toolkit Alembic nodes.")
         tk_houdini_alembic = self.import_module("tk_houdini_alembicnode")
-        tk_houdini_alembic.convert_back_to_toolkit_alembic_nodes(self)
+        tk_houdini_alembic.TkAlembicNodeHandler.\
+            convert_back_to_tk_alembic_nodes(self)
 
 

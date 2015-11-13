@@ -21,11 +21,12 @@ class TkAlembicNodeHandler(object):
     ############################################################################
     # Class data
 
-    HOU_ROP_ALEMBIC_TYPE = "rop_alembic"
-    """Houdini type for regular alembic rops."""
+    HOU_ROP_ALEMBIC_TYPE = "alembic"
+    """Houdini type for alembic rops."""
 
-    HOU_SOP_ALEMBIC_TYPE = "alembic"
-    """Houdini type for regular alembic sops."""
+    HOU_SOP_ALEMBIC_TYPE = "rop_alembic"  
+    """Houdini type for alembic sops."""
+    # this is correct. the houdini internal rop_alembic is a sop.
 
     NODE_OUTPUT_PATH_PARM = "filename"
     """The name of the output path parameter on the node."""
@@ -43,7 +44,7 @@ class TkAlembicNodeHandler(object):
     # Class methods
 
     @classmethod
-    def convert_back_to_toolkit_alembic_nodes(cls, app):
+    def convert_back_to_tk_alembic_nodes(cls, app):
         """Convert Alembic nodes back to Toolkit Alembic nodes.
 
         :param app: The calling Toolkit Application
@@ -59,6 +60,10 @@ class TkAlembicNodeHandler(object):
             cls.HOU_SOP_ALEMBIC_TYPE).instances())
         alembic_nodes.extend(hou.nodeType(hou.ropNodeTypeCategory(),
             cls.HOU_ROP_ALEMBIC_TYPE).instances())
+
+        if not alembic_nodes:
+            app.log_debug("No Alembic Nodes found for conversion.")
+            return
 
         # the tk node type we'll be converting to
         node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
@@ -89,7 +94,7 @@ class TkAlembicNodeHandler(object):
                 config_parm = tk_alembic_node.parm(
                     TkAlembicNodeHandler.TK_CONFIG_PARM)
                 index = config_parm.menuLabels().index(tk_config_name)
-                parm.set(index)
+                config_parm.set(index)
             except ValueError:
                 pass
 
@@ -105,8 +110,8 @@ class TkAlembicNodeHandler(object):
             tk_alembic_node.setColor(alembic_node.color())
 
             # remember the name and position of the original alembic node
-            alembic_node_name = n.name()
-            alembic_node_pos = n.position()
+            alembic_node_name = alembic_node.name()
+            alembic_node_pos = alembic_node.position()
 
             # destroy the original alembic node
             alembic_node.destroy()
@@ -127,13 +132,6 @@ class TkAlembicNodeHandler(object):
 
         """
 
-        # retrieve all of the tk alembic nodes in the session
-        tk_alembic_nodes = cls.get_tk_alembic_nodes()
-
-        if not tk_alembic_nodes:
-            app.log_debug("No Toolkit Alembic Nodes found for conversion.")
-            return
-
         node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
 
         # determine the surface operator type for this class of node
@@ -150,6 +148,10 @@ class TkAlembicNodeHandler(object):
             hou.nodeType(hou.sopNodeTypeCategory(), node_type).instances())
         tk_alembic_nodes.extend(
             hou.nodeType(hou.ropNodeTypeCategory(), node_type).instances())
+
+        if not tk_alembic_nodes:
+            app.log_debug("No Toolkit Alembic Nodes found for conversion.")
+            return
 
         # iterate over all the tk alembic nodes and attempt to convert them
         for tk_alembic_node in tk_alembic_nodes:
@@ -226,17 +228,30 @@ class TkAlembicNodeHandler(object):
     # methods and callbacks executed via the OTLs
 
 
-    # create an Alembic node,  set the path to the output path of current node
-    def _create_alembic_node(self):
-        current_node = hou.pwd()
+    # copy the render path for the current node to the clipboard
+    def copy_path_to_clipboard(self):
 
+        render_path = self._get_render_path(hou.pwd())
+
+        # use Qt to copy the path to the clipboard:
+        from sgtk.platform.qt import QtGui
+        QtGui.QApplication.clipboard().setText(render_path)
+
+        self._app.log_debug(
+            "Copied render path to clipboard: %s" % (render_path,))
+
+
+    # create an Alembic node, set the path to the output path of current node
+    def create_alembic_node(self):
         cls = self.__class__
 
+        current_node = hou.pwd()
         output_path_parm = current_node.parm(cls.NODE_OUTPUT_PATH_PARM)
         alembic_node_name = 'alembic_' + current_node.name()
 
         # create the alembic node and set the filename parm
-        alembic_node = node.parent().createNode(cls.HOU_SOP_ALEMBIC_TYPE)
+        alembic_node = current_node.parent().createNode(
+            cls.HOU_SOP_ALEMBIC_TYPE)
         alembic_node.parm(cls.NODE_OUTPUT_PATH_PARM).set(
             output_path_parm.menuLabels()[output_path_parm.eval()])
         alembic_node.setName(alembic_node_name, unique_name=True)
@@ -245,8 +260,22 @@ class TkAlembicNodeHandler(object):
         alembic_node.moveToGoodPosition()
 
 
+    # get labels for all tk-houdini-alembic node configurations
+    def get_configuration_menu_labels(self):
+
+        menu_labels = []
+        engine = self._app.engine
+        for instance_name, app in engine.apps.iteritems():
+            if app.name == self._app.name:
+                menu_labels.append(app.instance_name)
+                menu_labels.append(app.get_setting('name'))
+
+        return menu_labels
+
+
     # returns a list of menu items for the current node
-    def _get_output_path_menu_items(self):
+    def get_output_path_menu_items(self):
+
         menu = ["sgtk"]
         current_node = hou.pwd()
 
@@ -262,21 +291,8 @@ class TkAlembicNodeHandler(object):
         return menu
 
 
-    # copy the render path for the current node to the clipboard
-    def _copy_path_to_clipboard(self):
-
-        render_path = self._get_render_path(hou.pwd())
-
-        # use Qt to copy the path to the clipboard:
-        from sgtk.platform.qt import QtGui
-        QtGui.QApplication.clipboard().setText(render_path)
-
-        self._app.log_debug(
-            "Copied render path to clipboard: %s" % (render_path,))
-
-
     # open a file browser showing the render path of the current node
-    def _show_in_fs(self):
+    def show_in_fs(self):
 
         # retrieve the calling node
         current_node = hou.pwd()
@@ -305,7 +321,7 @@ class TkAlembicNodeHandler(object):
             if not rendered_files:
                 msg = ("Unable to find rendered files for node '%s'." 
                        % (current_node,))
-                self.log_error(msg)
+                self._app.log_error(msg)
                 hou.ui.displayMessage(msg)
                 return
             else:
@@ -313,7 +329,7 @@ class TkAlembicNodeHandler(object):
 
         # if we have a valid render path then show it:
         if render_dir:
-            # XXX call utility method on core
+            # TODO: move to utility method in core
             system = sys.platform
 
             # run the app
@@ -325,7 +341,7 @@ class TkAlembicNodeHandler(object):
                 cmd = "cmd.exe /C start \"Folder\" \"%s\"" % render_dir
             else:
                 msg = "Platform '%s' is not supported." % (system,)
-                self.log_error(msg)
+                self._app.log_error(msg)
                 hou.ui.displayMessage(msg)
 
             self._app.log_debug("Executing command:\n '%s'" % (cmd,))
@@ -336,9 +352,9 @@ class TkAlembicNodeHandler(object):
 
     # lookup the default node name from the settings and apply it to the
     # supplied node
-    def _set_default_node_name(self, node):
+    def set_default_node_name(self, node):
         default_name = self._app.get_setting('default_node_name')
-        return node.setName(name, unique_name=True)
+        return node.setName(default_name, unique_name=True)
 
 
     ############################################################################
@@ -361,9 +377,10 @@ class TkAlembicNodeHandler(object):
         # create fields dict with all the metadata
         fields = {
             "name": work_file_fields.get("name", None),
-            "version": work_file_fields.get("version", None),
+            "node": node.name(),
             "renderpass": node.name(),
             "SEQ": "FORMAT: $F",
+            "version": work_file_fields.get("version", None),
         }
 
         # get the camera width and height if necessary
@@ -379,7 +396,7 @@ class TkAlembicNodeHandler(object):
 
         fields.update(self._app.context.as_template_fields(work_cache_template))
 
-        path = template.apply_fields(fields)
+        path = work_cache_template.apply_fields(fields)
         path = path.replace(os.path.sep, "/")
 
         return path
@@ -415,7 +432,7 @@ class TkAlembicNodeHandler(object):
             msg = ("Unable to validate files on disk for node %s."
                    "The path '%s' is not recognized by Shotgun."
                    % (node.name(), file_name))
-            self.log_error(msg)
+            self._app.log_error(msg)
             return []
             
         fields = template.get_fields(file_name)
@@ -436,9 +453,9 @@ def _copy_inputs(source_node, target_node):
     input_connections = source_node.inputConnections()
     num_target_inputs = len(target_node.inputConnectors())
 
-    if len(input_connections) != num_target_inputs:
+    if len(input_connections) > num_target_inputs:
         raise hou.InvalidInput(
-            "Node input count does not match. Cannot copy inputs from "
+            "Not enough inputs on target node. Cannot copy inputs from "
             "'%s' to '%s'" % (source_node, target_node)
         )
         
