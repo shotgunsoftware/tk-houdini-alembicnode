@@ -1,4 +1,4 @@
-# Copyright (c) 2013 Shotgun Software Inc.
+# Copyright (c) 2015 Shotgun Software Inc.
 #
 # CONFIDENTIAL AND PROPRIETARY
 #
@@ -96,7 +96,8 @@ class TkAlembicNodeHandler(object):
                 index = config_parm.menuLabels().index(tk_config_name)
                 config_parm.set(index)
             except ValueError:
-                pass
+                app.log_warning("No configuration found named: %s" % 
+                    (tk_config_name,))
 
             # copy over all parameter values except the output path 
             _copy_parm_values(alembic_node, tk_alembic_node,
@@ -382,17 +383,6 @@ class TkAlembicNodeHandler(object):
             "SEQ": "FORMAT: $F",
             "version": work_file_fields.get("version", None),
         }
-
-        # get the camera width and height if necessary
-        if ("width" in work_cache_template.keys or 
-            "height" in work_cache_template.keys):
-            cam_path = node.parm("geometry1_camera").eval()
-            cam_node = hou.node(cam_path)
-            if not cam_node:
-                raise sgtk.TankError("Camera %s not found." % cam_path)
-
-            fields["width"] = cam_node.parm("resx").eval()
-            fields["height"] = cam_node.parm("resy").eval()
 
         fields.update(self._app.context.as_template_fields(work_cache_template))
 
