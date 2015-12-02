@@ -49,8 +49,8 @@ class TkAlembicNodeApp(sgtk.platform.Application):
     def convert_back_to_tk_alembic_nodes(self):
         """Convert regular Alembic nodes back to Tooklit Alembic nodes.
         
-        Convert any regular Alembic nodes that were previously been converted
-        from Tooklit Alembic nodes, back into Toolkit Alembic nodes.
+        Convert any regular Alembic nodes that were previously converted
+        from Tooklit Alembic nodes back into Toolkit Alembic nodes.
 
         Example usage::
 
