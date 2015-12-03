@@ -8,11 +8,17 @@
 # agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
 
+# built-ins
+import base64
 import os
+import pickle
 import sys
+import zlib
 
+# houdini
 import hou
 
+# toolkit
 import sgtk
 
 
@@ -35,6 +41,23 @@ class TkAlembicNodeHandler(object):
 
     TK_ALEMBIC_NODE_TYPE = "sgtk_alembic"
     """The class of node as defined in Houdini for the Alembic nodes."""
+
+    TK_OUTPUT_CONNECTIONS_KEY = "tk_output_connections"
+    """The key in the user data that stores the save output connections."""
+
+    TK_OUTPUT_CONNECTION_CODEC = "sgtk-01"
+    """The encode/decode scheme currently being used."""
+
+    TK_OUTPUT_CONNECTION_CODECS = {
+        "sgtk-01": {
+            'encode': lambda data: \
+                base64.b64encode(zlib.compress(pickle.dumps(data))),
+            'decode': lambda data_str: \
+                pickle.loads(zlib.decompress(base64.b64decode(data_str))),
+        },
+    }
+    """Encode/decode schemes. To support backward compatibility if changes."""
+    # codec names should not include a ":"
 
     TK_OUTPUT_PROFILE_PARM = "output_profile"
     """The name of the parameter that stores the current output profile."""
@@ -69,7 +92,7 @@ class TkAlembicNodeHandler(object):
             return
 
         # the tk node type we'll be converting to
-        node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
+        tk_node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
 
         # iterate over all the alembic nodes and attempt to convert them
         for alembic_node in alembic_nodes:
@@ -90,7 +113,7 @@ class TkAlembicNodeHandler(object):
                 continue
 
             # create a new, Toolkit Alembic node:
-            tk_alembic_node = alembic_node.parent().createNode(node_type)
+            tk_alembic_node = alembic_node.parent().createNode(tk_node_type)
 
             # find the index of the stored name on the new tk alembic node
             # and set that item in the menu.
@@ -110,7 +133,12 @@ class TkAlembicNodeHandler(object):
 
             # copy the inputs and move the outputs
             _copy_inputs(alembic_node, tk_alembic_node)
-            _move_outputs(alembic_node, tk_alembic_node)
+
+            # determine the built-in operator type
+            if alembic_node.type().name() == cls.HOU_SOP_ALEMBIC_TYPE:
+                _restore_outputs_from_user_data(alembic_node, tk_alembic_node)
+            elif alembic_node.type().name() == cls.HOU_ROP_ALEMBIC_TYPE:
+                _move_outputs(alembic_node, tk_alembic_node)
 
             # make the new node the same color. the profile will set a color, 
             # but do this just in case the user changed the color manually
@@ -141,22 +169,22 @@ class TkAlembicNodeHandler(object):
 
         """
 
-        node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
+        tk_node_type = TkAlembicNodeHandler.TK_ALEMBIC_NODE_TYPE
 
         # determine the surface operator type for this class of node
         sop_types = hou.sopNodeTypeCategory().nodeTypes()
-        sop_type = sop_types[node_type]
+        sop_type = sop_types[tk_node_type]
 
         # determine the render operator type for this class of node
         rop_types = hou.ropNodeTypeCategory().nodeTypes()
-        rop_type = rop_types[node_type]
+        rop_type = rop_types[tk_node_type]
 
         # get all instances of tk alembic rop/sop nodes
         tk_alembic_nodes = []
         tk_alembic_nodes.extend(
-            hou.nodeType(hou.sopNodeTypeCategory(), node_type).instances())
+            hou.nodeType(hou.sopNodeTypeCategory(), tk_node_type).instances())
         tk_alembic_nodes.extend(
-            hou.nodeType(hou.ropNodeTypeCategory(), node_type).instances())
+            hou.nodeType(hou.ropNodeTypeCategory(), tk_node_type).instances())
 
         if not tk_alembic_nodes:
             app.log_debug("No Toolkit Alembic Nodes found for conversion.")
@@ -199,6 +227,8 @@ class TkAlembicNodeHandler(object):
             # copy the inputs and move the outputs
             _copy_inputs(tk_alembic_node, alembic_node)
             if alembic_operator == cls.HOU_SOP_ALEMBIC_TYPE:
+                _save_outputs_to_user_data(tk_alembic_node, alembic_node)
+            elif alembic_operator == cls.HOU_ROP_ALEMBIC_TYPE:
                 _move_outputs(tk_alembic_node, alembic_node)
 
             # make the new node the same color
@@ -527,7 +557,8 @@ def _copy_inputs(source_node, target_node):
         )
         
     for connection in input_connections:
-        target.setInput(connection.inputIndex(), connection.inputNode())
+        target_node.setInput(connection.inputIndex(),
+            connection.inputNode())
 
 
 # Copy parameter values of the source node to those of the target node if a
@@ -585,4 +616,61 @@ def _move_outputs(source_node, target_node):
         output_node = connection.outputNode()
         output_node.setInput(connection.inputIndex(), target_node)
 
+
+# saves output connections into user data of target node. Needed when target
+# node doesn't have outputs.
+def _save_outputs_to_user_data(source_node, target_node):
+
+    output_connections = source_node.outputConnections()
+    if not output_connections:
+        return
+
+    outputs = []
+    for connection in output_connections:
+        output_dict = {
+            'node': connection.outputNode().path(),
+            'input': connection.inputIndex(),
+        }
+        outputs.append(output_dict)
+
+    # get the current encoder for the handler
+    handler_cls = TkAlembicNodeHandler
+    codecs = handler_cls.TK_OUTPUT_CONNECTION_CODECS
+    encoder = codecs[handler_cls.TK_OUTPUT_CONNECTION_CODEC]['encode']
+
+    # encode and prepend the current codec name
+    data_str = handler_cls.TK_OUTPUT_CONNECTION_CODEC + ":" + encoder(outputs)
+
+    # set the encoded data string on the input node
+    target_node.setUserData(handler_cls.TK_OUTPUT_CONNECTIONS_KEY, data_str)
+
+
+# restore output connections from this node to the target node.
+def _restore_outputs_from_user_data(source_node, target_node):
+
+    data_str = source_node.userData(
+        TkAlembicNodeHandler.TK_OUTPUT_CONNECTIONS_KEY)
+
+    if not data_str:
+        return
+
+    # parse the data str to determine the codec used
+    sep_index = data_str.find(":")
+    codec_name = data_str[:sep_index]
+    data_str = data_str[sep_index + 1:]
+
+    # get the matching decoder based on the codec name
+    handler_cls = TkAlembicNodeHandler
+    codecs = handler_cls.TK_OUTPUT_CONNECTION_CODECS
+    decoder = codecs[codec_name]['decode']
+
+    # decode the data str back into original python objects
+    outputs = decoder(data_str)
+
+    if not outputs:
+        return
+
+    for connection in outputs:
+        output_node = hou.node(connection['node'])
+        output_node.setInput(connection['input'], target_node)
 
