@@ -15,8 +15,10 @@ import hou
 
 import sgtk
 
+
 class TkAlembicNodeHandler(object):
     """Handle Tk Alembic node operations and callbacks."""
+
 
     ############################################################################
     # Class data
@@ -34,11 +36,12 @@ class TkAlembicNodeHandler(object):
     TK_ALEMBIC_NODE_TYPE = "sgtk_alembic"
     """The class of node as defined in Houdini for the Alembic nodes."""
 
-    TK_CONFIG_PARM = "alembic_config"
-    """The name of the parameter that stores the toolkit node configuration."""
+    TK_OUTPUT_PROFILE_PARM = "output_profile"
+    """The name of the parameter that stores the current output profile."""
 
-    TK_CONFIG_NAME_KEY = "tk_config_name"
-    """The name of the key in the user data that stores the config name."""
+    TK_OUTPUT_PROFILE_NAME_KEY = "tk_output_profile_name"
+    """The key in the user data that stores the output profile name."""
+
 
     ############################################################################
     # Class methods
@@ -74,12 +77,13 @@ class TkAlembicNodeHandler(object):
             # get the user data dictionary stored on the node
             user_dict = alembic_node.userDataDict()
 
-            # get the config data from the dictionary
-            tk_config_name = user_dict.get(cls.TK_CONFIG_NAME_KEY)
+            # get the output_profile from the dictionary
+            tk_output_profile_name = user_dict.get(
+                cls.TK_OUTPUT_PROFILE_NAME_KEY)
 
-            if not tk_config_name:
+            if not tk_output_profile_name:
                 app.log_warning(
-                    "Almbic node '%s' does not have tk config name. "
+                    "Almbic node '%s' does not have an output profile name. "
                     "Can't convert to Tk Alembic node. Continuing." %
                     (alembic_node.name(),)
                 )
@@ -91,13 +95,14 @@ class TkAlembicNodeHandler(object):
             # find the index of the stored name on the new tk alembic node
             # and set that item in the menu.
             try:
-                config_parm = tk_alembic_node.parm(
-                    TkAlembicNodeHandler.TK_CONFIG_PARM)
-                index = config_parm.menuLabels().index(tk_config_name)
-                config_parm.set(index)
+                output_profile_parm = tk_alembic_node.parm(
+                    TkAlembicNodeHandler.TK_OUTPUT_PROFILE_PARM)
+                output_profile_index = output_profile_parm.menuLabels().index(
+                    tk_output_profile_name)
+                output_profile_parm.set(output_profile_index)
             except ValueError:
-                app.log_warning("No configuration found named: %s" % 
-                    (tk_config_name,))
+                app.log_warning("No output profile found named: %s" % 
+                    (tk_output_profile_name,))
 
             # copy over all parameter values except the output path 
             _copy_parm_values(alembic_node, tk_alembic_node,
@@ -107,7 +112,9 @@ class TkAlembicNodeHandler(object):
             _copy_inputs(alembic_node, tk_alembic_node)
             _move_outputs(alembic_node, tk_alembic_node)
 
-            # make the new node the same color
+            # make the new node the same color. the profile will set a color, 
+            # but do this just in case the user changed the color manually
+            # prior to the conversion.
             tk_alembic_node.setColor(alembic_node.color())
 
             # remember the name and position of the original alembic node
@@ -124,6 +131,7 @@ class TkAlembicNodeHandler(object):
 
             app.log_debug("Converted: Alembic node '%s' to TK Alembic node."
                 % (alembic_node_name,))
+
 
     @classmethod
     def convert_to_regular_alembic_nodes(cls, app):
@@ -179,11 +187,14 @@ class TkAlembicNodeHandler(object):
             _copy_parm_values(tk_alembic_node, alembic_node,
                 excludes=[cls.NODE_OUTPUT_PATH_PARM])
 
-            # store the alembic config name in the user data so that we can
-            # retrieve it later.
-            config_parm = tk_alembic_node.parm(cls.TK_CONFIG_PARM)
-            tk_config_name = config_parm.menuLabels()[config_parm.eval()]
-            alembic_node.setUserData(cls.TK_CONFIG_NAME_KEY, tk_config_name)
+            # store the alembic output profile name in the user data so that we
+            # can retrieve it later.
+            output_profile_parm = tk_alembic_node.parm(
+                cls.TK_OUTPUT_PROFILE_PARM)
+            tk_output_profile_name = \
+                output_profile_parm.menuLabels()[output_profile_parm.eval()]
+            alembic_node.setUserData(cls.TK_OUTPUT_PROFILE_NAME_KEY, 
+                tk_output_profile_name)
 
             # copy the inputs and move the outputs
             _copy_inputs(tk_alembic_node, alembic_node)
@@ -212,7 +223,6 @@ class TkAlembicNodeHandler(object):
     ############################################################################
     # Instance methods
 
-
     def __init__(self, app):
         """Initialize the handler.
         
@@ -223,11 +233,27 @@ class TkAlembicNodeHandler(object):
         # keep a reference to the app for easy access to templates, settings,
         # logging methods, tank, context, etc.
         self._app = app
-    
+
+        # get and cache the list of profiles defined in the settings
+        self._output_profiles = {}
+        for output_profile in self._app.get_setting("output_profiles", []):
+            output_profile_name = output_profile["name"]
+
+            if output_profile_name in self._output_profiles:
+                self._app.log_warning(
+                    "Found multiple output profiles named '%s' for the "
+                    "Tk Alembic node! Only the first one will be available." %
+                    (output_profile_name,)
+                )
+                continue
+
+            self._output_profiles[output_profile_name] = output_profile
+            self._app.log_debug("Caching alembic output profile: '%s'" % 
+                (output_profile_name,))
+
 
     ############################################################################
     # methods and callbacks executed via the OTLs
-
 
     # copy the render path for the current node to the clipboard
     def copy_path_to_clipboard(self):
@@ -261,15 +287,12 @@ class TkAlembicNodeHandler(object):
         alembic_node.moveToGoodPosition()
 
 
-    # get labels for all tk-houdini-alembic node configurations
-    def get_configuration_menu_labels(self):
+    # get labels for all tk-houdini-alembic node output profiles
+    def get_output_profile_menu_labels(self):
 
         menu_labels = []
-        engine = self._app.engine
-        for instance_name, app in engine.apps.iteritems():
-            if app.name == self._app.name:
-                menu_labels.append(app.instance_name)
-                menu_labels.append(app.get_setting('name'))
+        for count, output_profile_name in enumerate(self._output_profiles):
+            menu_labels.extend([count, output_profile_name])
 
         return menu_labels
 
@@ -290,6 +313,35 @@ class TkAlembicNodeHandler(object):
             menu.append("ERROR: %s" % (error_msg,))
 
         return menu
+
+
+    # apply the selected profile in the session
+    def set_profile(self, node=None):
+
+        if not node:
+            node = hou.pwd()
+
+        output_profile = self._get_output_profile(node)
+
+        self._app.log_debug("Applying tk alembic node profile: %s" % 
+            (output_profile["name"],))
+
+        # apply the supplied settings to the node
+        settings = output_profile["settings"]
+        if settings:
+            self._app.log_debug('Populating format settings: %s' % 
+                (file_settings,))
+            node.setParms(settings)
+
+        # set the node color
+        color = output_profile["color"]
+        if color:
+            node.setColor(hou.Color(color))
+
+        # trigger a redraw of the output path parm to get the menu to update.
+        # There is probably a better way to do this. if so, please update.
+        node.parm(self.__class__.NODE_OUTPUT_PATH_PARM).disable(True)
+        node.parm(self.__class__.NODE_OUTPUT_PATH_PARM).disable(False)
 
 
     # open a file browser showing the render path of the current node
@@ -351,16 +403,19 @@ class TkAlembicNodeHandler(object):
                 msg = "Failed to launch '%s'!" % (cmd,)
                 hou.ui.displayMessage(msg)
 
-    # lookup the default node name from the settings and apply it to the
-    # supplied node
-    def set_default_node_name(self, node):
+
+    # called when the node is created.
+    def setup_node(self, node):
+
         default_name = self._app.get_setting('default_node_name')
-        return node.setName(default_name, unique_name=True)
+        node.setName(default_name, unique_name=True)
+
+        # apply the default profile
+        self.set_profile(node)
 
 
     ############################################################################
     # Private methods
-
 
     # compute the output path based on the current work file and cache template
     def _compute_output_path(self, node):
@@ -372,8 +427,11 @@ class TkAlembicNodeHandler(object):
             msg = "This Houdini file is not a Shotgun Toolkit work file!"
             raise sgtk.TankError(msg)
 
+        output_profile = self._get_output_profile(node)
+
         # Get the cache templates from the app
-        work_cache_template = self._app.get_template("work_cache_template")
+        output_cache_template = self._app.get_template_by_name(
+            output_profile["output_cache_template"])
 
         # create fields dict with all the metadata
         fields = {
@@ -384,13 +442,28 @@ class TkAlembicNodeHandler(object):
             "version": work_file_fields.get("version", None),
         }
 
-        fields.update(self._app.context.as_template_fields(work_cache_template))
+        fields.update(self._app.context.as_template_fields(
+            output_cache_template))
 
-        path = work_cache_template.apply_fields(fields)
+        path = output_cache_template.apply_fields(fields)
         path = path.replace(os.path.sep, "/")
 
         return path
 
+
+    # get the current output profile
+    def _get_output_profile(self, node=None):
+
+        if not node:
+            node = hou.pwd()
+
+        output_profile_parm = node.parm(self.__class__.TK_OUTPUT_PROFILE_PARM)
+        output_profile_name = \
+            output_profile_parm.menuLabels()[output_profile_parm.eval()]
+        output_profile = self._output_profiles[output_profile_name]
+
+        return output_profile
+            
 
     # extract fields from current Houdini file using the workfile template
     def _get_hipfile_fields(self):
@@ -416,26 +489,30 @@ class TkAlembicNodeHandler(object):
     def _get_rendered_files(self, node):
 
         file_name = self._get_render_path(node)
-        template = self._app.get_template("work_cache_template")
 
-        if not template.validate(file_name):
+        output_profile = self._get_output_profile(node)
+
+        # get the output cache template for the current profile
+        output_cache_template = self._app.get_template_by_name(
+            output_profile["output_cache_template"])
+
+        if not output_cache_template.validate(file_name):
             msg = ("Unable to validate files on disk for node %s."
                    "The path '%s' is not recognized by Shotgun."
                    % (node.name(), file_name))
             self._app.log_error(msg)
             return []
             
-        fields = template.get_fields(file_name)
+        fields = output_cache_template.get_fields(file_name)
 
         # get the actual file paths based on the template. Ignore any sequence
         # or eye fields
         return self._app.tank.paths_from_template(
-            template, fields, ["SEQ", "eye"])
+            output_cache_template, fields, ["SEQ", "eye"])
 
 
 ################################################################################
 # Utility methods
-
 
 # Copy all the input connections from this node to the target node.
 def _copy_inputs(source_node, target_node):
