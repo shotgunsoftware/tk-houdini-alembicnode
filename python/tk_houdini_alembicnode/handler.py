@@ -11,9 +11,13 @@
 # built-ins
 import base64
 import os
-import pickle
 import sys
 import zlib
+
+try:
+   import cPickle as pickle
+except:
+   import pickle
 
 # houdini
 import hou
@@ -300,16 +304,15 @@ class TkAlembicNodeHandler(object):
 
     # create an Alembic node, set the path to the output path of current node
     def create_alembic_node(self):
-        cls = self.__class__
 
         current_node = hou.pwd()
-        output_path_parm = current_node.parm(cls.NODE_OUTPUT_PATH_PARM)
+        output_path_parm = current_node.parm(self.NODE_OUTPUT_PATH_PARM)
         alembic_node_name = 'alembic_' + current_node.name()
 
         # create the alembic node and set the filename parm
         alembic_node = current_node.parent().createNode(
-            cls.HOU_SOP_ALEMBIC_TYPE)
-        alembic_node.parm(cls.NODE_OUTPUT_PATH_PARM).set(
+            self.HOU_SOP_ALEMBIC_TYPE)
+        alembic_node.parm(self.NODE_OUTPUT_PATH_PARM).set(
             output_path_parm.menuLabels()[output_path_parm.eval()])
         alembic_node.setName(alembic_node_name, unique_name=True)
 
@@ -370,8 +373,8 @@ class TkAlembicNodeHandler(object):
 
         # trigger a redraw of the output path parm to get the menu to update.
         # There is probably a better way to do this. if so, please update.
-        node.parm(self.__class__.NODE_OUTPUT_PATH_PARM).disable(True)
-        node.parm(self.__class__.NODE_OUTPUT_PATH_PARM).disable(False)
+        node.parm(self.NODE_OUTPUT_PATH_PARM).disable(True)
+        node.parm(self.NODE_OUTPUT_PATH_PARM).disable(False)
 
 
     # open a file browser showing the render path of the current node
@@ -487,7 +490,7 @@ class TkAlembicNodeHandler(object):
         if not node:
             node = hou.pwd()
 
-        output_profile_parm = node.parm(self.__class__.TK_OUTPUT_PROFILE_PARM)
+        output_profile_parm = node.parm(self.TK_OUTPUT_PROFILE_PARM)
         output_profile_name = \
             output_profile_parm.menuLabels()[output_profile_parm.eval()]
         output_profile = self._output_profiles[output_profile_name]
@@ -510,7 +513,7 @@ class TkAlembicNodeHandler(object):
 
     # get the render path from current item in the output path parm menu
     def _get_render_path(self, node):
-        output_parm = node.parm(self.__class__.NODE_OUTPUT_PATH_PARM)
+        output_parm = node.parm(self.NODE_OUTPUT_PATH_PARM)
         path = output_parm.menuLabels()[output_parm.eval()]
         return path
 
