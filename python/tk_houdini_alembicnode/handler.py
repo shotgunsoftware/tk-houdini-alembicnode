@@ -448,6 +448,16 @@ class TkAlembicNodeHandler(object):
         # apply the default profile
         self.set_profile(node)
 
+        try:
+            self._app.log_metric("Create")
+            self._app.engine.log_user_attribute_metric(
+                "%s version" % (self._app.name,),
+                self._app.version,
+            )
+        except:
+            # ingore any errors. ex: metrics logging not supported
+            pass
+
 
     ############################################################################
     # Private methods
