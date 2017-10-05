@@ -255,7 +255,7 @@ class TkAlembicNodeHandler(object):
     @classmethod
     def get_all_tk_alembic_nodes(cls):
         """
-        Returns a list of all tk-houdini-alembic node instances in the current
+        Returns a list of all tk-houdini-alembicnode instances in the current
         session.
         """
 
