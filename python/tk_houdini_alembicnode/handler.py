@@ -14,10 +14,7 @@ import os
 import sys
 import zlib
 
-try:
-    import six.moves.cPickle as pickle
-except:
-    from sgtk.util import pickle
+from sgtk.util import pickle
 
 # houdini
 import hou
