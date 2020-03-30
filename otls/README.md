@@ -7,7 +7,7 @@ These step will guide you through the process of updating the otl file.
 
 2. Launch Houdini from Shotgun using the Houdini version you wish to check for parameter updates on.
 
-3. Open a new scene on an Shot or an Asset.
+3. Open a new scene on an Shot or an Asset using Workfiles.
 
 4. Run the following script in the Houdini Python shell.
     ```python
