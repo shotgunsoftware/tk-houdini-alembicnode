@@ -31,7 +31,7 @@ These step will guide you through the process of updating the otl file.
 
 6. In the parameter window for the selected node, click on the cog icon, just to the right of the node name, and choose "Type properties..."
 
-7. In the newly opened Window, make sure you are in the parameters tab. Now it's case of moving any missing parameters
+7. In the newly opened Window, make sure you are in the parameters tab. Now it's time to add any missing parameters
 highlighted when running the script over from the left side to the right side. You will probably need to transfer the properties from a standard alembic node to your sgtk one. To do this, first disable this setting:
 ![](forbid_linking.png)
 Then you should move the missing parameters over to the sgtk node into the correct place in the structure, and also adjust the channel to repath it from `/out/alembic1` to `alembic1`:
