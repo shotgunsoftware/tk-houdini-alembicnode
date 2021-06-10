@@ -5,7 +5,7 @@ These step will guide you through the process of updating the otl file.
 
 1. Ensure you have locally cloned this repo, and then set the `tk-houdini-alembicnode` location in your config to point at the local repo using a dev descriptor.
 
-2. Launch Houdini from Shotgun using the Houdini version you wish to check for parameter updates on.
+2. Launch Houdini from ShotGrid using the Houdini version you wish to check for parameter updates on.
 
 3. Open a new scene on a Shot or an Asset using Workfiles.
 
