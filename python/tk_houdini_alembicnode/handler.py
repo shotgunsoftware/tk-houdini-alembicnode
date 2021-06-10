@@ -574,7 +574,8 @@ class TkAlembicNodeHandler(object):
         if not output_cache_template.validate(file_name):
             msg = (
                 "Unable to validate files on disk for node %s."
-                "The path '%s' is not recognized by ShotGrid." % (node.name(), file_name)
+                "The path '%s' is not recognized by ShotGrid."
+                % (node.name(), file_name)
             )
             self._app.log_error(msg)
             return []
