@@ -502,7 +502,7 @@ class TkAlembicNodeHandler(object):
         work_file_fields = self._get_hipfile_fields()
 
         if not work_file_fields:
-            msg = "This Houdini file is not a SG Toolkit work file!"
+            msg = "This Houdini file is not a Flow Production Tracking Toolkit work file!"
             raise sgtk.TankError(msg)
 
         output_profile = self._get_output_profile(node)
