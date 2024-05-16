@@ -81,16 +81,18 @@ class TkAlembicNodeHandler(object):
 
         # get all rop/sop alembic nodes in the session
         alembic_nodes = []
-        alembic_nodes.extend(
-            hou.nodeType(
-                hou.sopNodeTypeCategory(), cls.HOU_SOP_ALEMBIC_TYPE
-            ).instances()
-        )
-        alembic_nodes.extend(
-            hou.nodeType(
-                hou.ropNodeTypeCategory(), cls.HOU_ROP_ALEMBIC_TYPE
-            ).instances()
-        )
+        
+        sop_nodes = hou.nodeType(hou.sopNodeTypeCategory(), cls.HOU_SOP_ALEMBIC_TYPE)
+        rop_nodes = hou.nodeType(hou.ropNodeTypeCategory(), cls.HOU_ROP_ALEMBIC_TYPE)
+        
+        if sop_nodes:
+            alembic_nodes.extend(
+                sop_nodes.instances()
+            )
+        if rop_nodes:
+            alembic_nodes.extend(
+                rop_nodes.instances()
+            )
 
         if not alembic_nodes:
             app.log_debug("No Alembic Nodes found for conversion.")
@@ -190,12 +192,16 @@ class TkAlembicNodeHandler(object):
 
         # get all instances of tk alembic rop/sop nodes
         tk_alembic_nodes = []
-        tk_alembic_nodes.extend(
-            hou.nodeType(hou.sopNodeTypeCategory(), tk_node_type).instances()
-        )
-        tk_alembic_nodes.extend(
-            hou.nodeType(hou.ropNodeTypeCategory(), tk_node_type).instances()
-        )
+        sop_nodes = hou.nodeType(hou.sopNodeTypeCategory(), tk_node_type)
+        rop_nodes = hou.nodeType(hou.ropNodeTypeCategory(), tk_node_type)
+        if sop_nodes:
+            tk_alembic_nodes.extend(            
+                sop_nodes.instances()
+            )
+        if rop_nodes:
+            tk_alembic_nodes.extend(
+                rop_nodes.instances()
+            )
 
         if not tk_alembic_nodes:
             app.log_debug("No Toolkit Alembic Nodes found for conversion.")
@@ -278,13 +284,17 @@ class TkAlembicNodeHandler(object):
 
         # get all instances of tk alembic rop/sop nodes
         tk_alembic_nodes = []
-        tk_alembic_nodes.extend(
-            hou.nodeType(hou.sopNodeTypeCategory(), tk_node_type).instances()
-        )
-        tk_alembic_nodes.extend(
-            hou.nodeType(hou.ropNodeTypeCategory(), tk_node_type).instances()
-        )
-
+        sop_nodes = hou.nodeType(hou.sopNodeTypeCategory(), tk_node_type)
+        rop_nodes = hou.nodeType(hou.ropNodeTypeCategory(), tk_node_type)
+        if sop_nodes:
+            tk_alembic_nodes.extend(            
+                sop_nodes.instances()
+            )
+        if rop_nodes:
+            tk_alembic_nodes.extend(
+                rop_nodes.instances()
+            )
+            
         return tk_alembic_nodes
 
     @classmethod
