@@ -592,6 +592,7 @@ class TkAlembicNodeHandler(object):
 ################################################################################
 # Utility methods
 
+
 # Copy all the input connections from this node to the target node.
 def _copy_inputs(source_node, target_node):
 
